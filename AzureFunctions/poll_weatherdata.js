@@ -1,32 +1,42 @@
 const { app, output } = require('@azure/functions');
 
 const cosmosOutput = output.cosmosDB({
-    databaseName: 'ToDoList',
-    collectionName: 'Items',
-    createIfNotExists: true,
+    databaseName: 'IoT',
+    collectionName: 'telemetry',
+    createIfNotExists: false,
     connectionStringSetting: 'CosmosDBConnection',
+
 });
 
 app.timer('poll_weatherdata', {
     schedule: '0 0 * * * *',
-    return: cosmosOutput,
+    extraOutputs: [cosmosOutput],
     handler: async (myTimer, context) => {
         context.log("Started by timer");
 
         const r = await fetch("https://opendata-download-metobs.smhi.se/api/version/latest/parameter/1/station/72420/period/latest-hour/data.json");
-        const fetchJson = await r.json();
+        const rJson = await r.json();
 
         if (r.status === 200) {
-            // Return the result to cosmosDB and thru HTTP
-            return {
-                "partitionKey": fetchJson.station.key,
-                "name": fetchJson.station.name,
-                "device_type": "weatherStation",
-                "telemetry": {
-                    "temperature": fetchJson.value[0].value,
-                    "timestamp": fetchJson.value[0].date
-                }
-            };
+            context.log("Saving to cosmosOutput")
+            try {
+                await context.extraOutputs.set(cosmosOutput, {
+                    "device_id": rJson.station.key,
+                    "sample_id": rJson.station.key + ":" + rJson.value[0].date,
+                    "metadata": {
+                        "name": rJson.station.name,
+                        "device_type": "weatherStation",
+                    },
+                    "telemetry": {
+                        "temperature": parseFloat(rJson.value[0].value),
+                        "timestamp": rJson.value[0].date
+                    }
+                })
+
+            } catch {
+                context.log("There was an error");
+            }
+
         }
     }
 });
